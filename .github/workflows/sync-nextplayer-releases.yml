@@ -1,0 +1,54 @@
+name: Sync Releases from anilbeesetti/nextplayer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync-releases:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y gh jq
+
+      - run: |
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/anilbeesetti/nextplayer/releases > releases.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: |
+          mkdir -p release_assets
+
+          jq -c '.[]' releases.json | while read -r release; do
+            tag=$(echo "$release" | jq -r '.tag_name')
+            name=$(echo "$release" | jq -r '.name // .tag_name')
+            body="Assets synced from upstream."
+
+            if gh release view "$tag" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+              continue
+            fi
+
+            rm -rf release_assets/*
+            gh release download "$tag" \
+              -R anilbeesetti/nextplayer \
+              -D release_assets > /dev/null 2>&1 || true
+
+            if [ "$(ls -A release_assets 2>/dev/null)" ]; then
+              gh release create "$tag" release_assets/* \
+                --repo "${{ github.repository }}" \
+                --title "$name" \
+                --notes "$body" > /dev/null
+            else
+              gh release create "$tag" \
+                --repo "${{ github.repository }}" \
+                --title "$name" \
+                --notes "$body" > /dev/null
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
